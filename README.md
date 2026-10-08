@@ -5,7 +5,7 @@ Ballest of Them All. Each plugin is a folder under `plugins/`, versioned on its 
 `<plugin id>-v<version>` (for example `grind-stats-v0.1.0`).
 
 - **Checkpoint Finder** (`plugins/checkpoint-finder`): marks every checkpoint of the map you're on, through walls,
-  and greys out the ones you've touched this run. Private for now, not in the registry.
+  and greys out the ones you've touched this run. F7 shows and hides them. Private for now, not in the registry.
 
 Grind Stats, which started here, now lives in
 [AnythingGoes-ballest/ballest-grind-stats](https://github.com/AnythingGoes-ballest/ballest-grind-stats) as its 0.2.0.
