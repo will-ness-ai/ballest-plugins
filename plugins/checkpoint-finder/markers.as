@@ -10,6 +10,9 @@ const float kDotSmallest = 12;         // px, from 128 m away
 const double kShrinkPerPixel = 400;    // cm farther for each pixel smaller
 const float kDotStep = 4;             // px: sizes come in steps, since restyling a dot rebuilds its window
 const float kEdge = 24;                // dots off the screen stay this far inside its edge
+const float kLabelWidth = 60;
+const float kLabelHeight = 20;
+const float kLabelGap = 4;
 const float kTouchedGrey = 0.45f;
 const float kTouchedOpacity = 0.4f;
 
@@ -21,9 +24,13 @@ const array<float> kPalette = {
 
 class Dot
 {
-    UI::Window@ circle;     // a window whose corner radius is half its size
-    UI::Window@ label;
-    UI::Text@ labelText;
+    private UI::Window@ circle;     // a window whose corner radius is half its size
+    private UI::Window@ label;
+    private UI::Text@ labelText;
+    // What the circle and label were last given: restyling a window rebuilds it, so it only happens on a change.
+    private float styledSize = -1;
+    private array<float> circleColour = {-1, -1, -1, -1};
+    private array<float> labelColour = {-1, -1, -1};
 
     Dot()
     {
@@ -35,26 +42,44 @@ class Dot
         @labelText = label.AddText("", 13);
     }
 
-    // Restyling (colour, corner radius) rebuilds the window, so it only happens when the look changes; moving and
-    // resizing don't.
-    void Style(float size, float r, float g, float b, float a)
+    // The circle, centred on a point of the screen. Moving it doesn't rebuild the window; a new size or colour does.
+    void Place(float sx, float sy, float size, float r, float g, float b, float a)
     {
-        if (size == styledSize && r == styled[0] && g == styled[1] && b == styled[2] && a == styled[3])
-            return;
-        styledSize = size;
-        styled = {r, g, b, a};
-        circle.SetBackground(r, g, b, a);
-        circle.SetCornerRadius(size / 2);
+        if (size != styledSize || r != circleColour[0] || g != circleColour[1] || b != circleColour[2] || a != circleColour[3])
+        {
+            styledSize = size;
+            circleColour = {r, g, b, a};
+            circle.SetBackground(r, g, b, a);
+            circle.SetCornerRadius(size / 2);
+        }
+        circle.SetRect(sx - size / 2, sy - size / 2, size, size);
+        circle.visible = true;
     }
+
+    // A label under the circle (over it at the bottom of the screen), kept on screen.
+    void Label(const string &in text, float sx, float sy, float size, float r, float g, float b, float w, float h)
+    {
+        labelText.text = text;
+        if (r != labelColour[0] || g != labelColour[1] || b != labelColour[2])
+        {
+            labelColour = {r, g, b};
+            labelText.SetColor(r, g, b, 1);
+        }
+        float y = sy + size / 2 + kLabelGap;
+        if (y + kLabelHeight > h)
+            y = sy - size / 2 - kLabelGap - kLabelHeight;
+        float x = Clamp(sx - kLabelWidth / 2, 0, w - kLabelWidth);
+        label.SetRect(x, y, kLabelWidth, kLabelHeight);
+        label.visible = true;
+    }
+
+    void HideLabel() { label.visible = false; }
 
     void Hide()
     {
         circle.visible = false;
         label.visible = false;
     }
-
-    private float styledSize = -1;
-    private array<float> styled = {-1, -1, -1, -1};
 
     private UI::Window@ Bare()
     {
@@ -79,10 +104,10 @@ class Markers
     {
         // A new list, or the host cleared the shapes (it does on a map change and when the game makes a new player
         // controller): make them again. Show is false for a shape that's gone.
-        if (builtFor != cps.generation || (balls.length() > 0 && !Draw::Show(balls[0], true)))
+        if (builtFor != cps.generation || !BallsAlive())
             MakeBalls(cps);
         for (uint k = 0; k < balls.length(); k++)
-            if (cps.touched[k] != ballTouched[k])
+            if (balls[k] != 0 && cps.touched[k] != ballTouched[k])
             {
                 ballTouched[k] = cps.touched[k];
                 float r, g, b;
@@ -104,16 +129,30 @@ class Markers
             dots[k].Hide();
     }
 
+    // False once the host has cleared the shapes. Show answers false for a shape that's gone; one ball stands for all,
+    // since the host clears them together. A ball the host couldn't make (id 0) is never asked about.
+    private bool BallsAlive()
+    {
+        for (uint k = 0; k < balls.length(); k++)
+            if (balls[k] != 0)
+                return Draw::Show(balls[k], true);
+        return true;
+    }
+
     private void MakeBalls(const Checkpoints@ cps)
     {
         Hide();
         builtFor = cps.generation;
         for (uint k = 0; k < cps.count; k++)
         {
-            float r, g, b;
-            Colour(k, cps.touched[k], r, g, b);
-            int ball = Draw::Ball(kBallRadius, r, g, b, true);
-            Draw::Move(ball, cps.x[k], cps.y[k], cps.z[k]);
+            int ball = 0;
+            if (cps.placed[k])
+            {
+                float r, g, b;
+                Colour(k, cps.touched[k], r, g, b);
+                ball = Draw::Ball(kBallRadius, r, g, b, true);
+                Draw::Move(ball, cps.x[k], cps.y[k], cps.z[k]);
+            }
             balls.insertLast(ball);
             ballTouched.insertLast(false);
         }
@@ -135,7 +174,7 @@ class Markers
         {
             Dot@ dot = dots[k];
             float sx = 0, sy = 0;
-            if (k >= cps.count || !Camera::Project(cps.x[k], cps.y[k], cps.z[k], sx, sy))
+            if (k >= cps.count || !cps.placed[k] || !Camera::Project(cps.x[k], cps.y[k], cps.z[k], sx, sy))
             {
                 dot.Hide();     // behind the camera
                 continue;
@@ -144,26 +183,14 @@ class Markers
             sy = Clamp(sy, kEdge, h - kEdge);
             double d = ball ? Math::sqrt(cps.DistanceSquared(k, bx, by, bz)) : 0;
             float size = Clamp(kDotLargest - float(d / kShrinkPerPixel), kDotSmallest, kDotLargest);
-            size = kDotSmallest + Math::floor((size - kDotSmallest) / kDotStep) * kDotStep;
+            size = kDotSmallest + Math::floor((size - kDotSmallest) / kDotStep + 0.5) * kDotStep;
             float r, g, b;
             Colour(k, cps.touched[k], r, g, b);
-            dot.Style(size, r, g, b, cps.touched[k] ? kTouchedOpacity : 1);
-            dot.circle.SetRect(sx - size / 2, sy - size / 2, size, size);
-            dot.circle.visible = true;
-            bool labelled = int(k) == nearest;
-            if (labelled)
-            {
-                string metres = int(d / 100) + " m";
-                if (dot.labelText.text != metres)
-                    dot.labelText.text = metres;
-                dot.labelText.SetColor(r, g, b, 1);
-                // Under the dot, or over it when the dot is pinned to the bottom edge.
-                float labelY = sy + size / 2 + 4;
-                if (labelY + 20 > h)
-                    labelY = sy - size / 2 - 24;
-                dot.label.SetRect(sx - 30, labelY, 60, 20);
-            }
-            dot.label.visible = labelled;
+            dot.Place(sx, sy, size, r, g, b, cps.touched[k] ? kTouchedOpacity : 1);
+            if (int(k) == nearest)
+                dot.Label(int(d / 100) + " m", sx, sy, size, r, g, b, w, h);
+            else
+                dot.HideLabel();
         }
     }
 }

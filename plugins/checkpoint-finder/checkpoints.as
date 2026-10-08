@@ -11,6 +11,7 @@ class Checkpoints
 {
     array<double> x, y, z;
     array<bool> touched;
+    array<bool> placed;     // false for one whose position the host couldn't give (it's not drawn)
     // Bumped whenever the list is read again (a new map, or checkpoints that turned up late), so a view knows to
     // rebuild what it drew for the old list.
     int generation = 0;
@@ -24,11 +25,14 @@ class Checkpoints
     void Update()
     {
         string key = Race::TrackKey();
-        if (key != trackKey || Race::CheckpointCount() != int(x.length()))
+        if (key != trackKey)
         {
             trackKey = key;
+            x.resize(0);        // a new map: nothing carries over
             Read();
         }
+        else if (Race::CheckpointCount() != int(x.length()))
+            Read();
         int now = Race::RunId();
         if (now != run)
         {
@@ -60,7 +64,7 @@ class Checkpoints
         double best = 0;
         for (uint k = 0; k < x.length(); k++)
         {
-            if (touched[k])
+            if (touched[k] || !placed[k])
                 continue;
             double d = DistanceSquared(k, px, py, pz);
             if (nearest < 0 || d < best)
@@ -80,22 +84,30 @@ class Checkpoints
 
     private void Read()
     {
+        // What was touched, by position: the host's list is sorted by position, so checkpoints that turn up a moment
+        // after the map loads can move the others' indexes, and a mark has to follow its checkpoint, not its index.
+        array<double> oldX = x, oldY = y, oldZ = z;
+        array<bool> oldTouched = touched;
         x.resize(0);
         y.resize(0);
         z.resize(0);
+        placed.resize(0);
+        touched.resize(0);
         // Index for index with the host's list, so Race::CurrentCheckpoint names the same checkpoint here.
         for (int k = 0; k < Race::CheckpointCount(); k++)
         {
             double cx = 0, cy = 0, cz = 0;
-            Race::CheckpointPosition(k, cx, cy, cz);
+            bool ok = Race::CheckpointPosition(k, cx, cy, cz);
+            bool was = false;
+            for (uint i = 0; ok && i < oldX.length(); i++)
+                if (oldTouched[i] && oldX[i] == cx && oldY[i] == cy && oldZ[i] == cz)
+                    was = true;
             x.insertLast(cx);
             y.insertLast(cy);
             z.insertLast(cz);
+            placed.insertLast(ok);
+            touched.insertLast(was);
         }
-        // The list is sorted by position, so checkpoints that turned up late can move the others' indexes: what was
-        // touched before can't be carried over, and starts again (the next touch marks the current one).
-        touched.resize(x.length());
-        ClearTouched();
         generation++;
         Log::Info(x.length() + " checkpoints on " + trackKey);
     }
