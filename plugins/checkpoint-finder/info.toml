@@ -1,0 +1,8 @@
+[meta]
+name = "Checkpoint Finder"
+version = "0.0.1"
+author = "Will"
+description = "PROTOTYPE: shows where a track's checkpoints are, five ways to compare in-game."
+
+[script]
+files = ["main.as"]
