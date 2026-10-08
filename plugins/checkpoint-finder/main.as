@@ -8,7 +8,6 @@ Checkpoints cps;
 Markers markers;
 bool shown = true;
 Input::Key toggle = Input::F7;
-string trackKey = "";
 
 void Main()
 {
@@ -17,8 +16,7 @@ void Main()
 
 void OnSettingsChanged()
 {
-    // The function keys are 0x70 (F1) onwards.
-    for (int code = 0x70; code <= 0x7B; code++)
+    for (int code = Input::F1; code <= Input::F12; code++)
         if (Input::Name(Input::Key(code)) == ToggleKey)
             toggle = Input::Key(code);
 }
@@ -32,14 +30,7 @@ void Update(float dt)
     {
         markers.Hide();
         cps.Leave();
-        trackKey = "";
         return;
-    }
-    string key = Race::TrackKey();
-    if (key != trackKey)
-    {
-        trackKey = key;
-        markers.Forget();       // the old map's shapes went with it
     }
     cps.Update();
     if (shown)

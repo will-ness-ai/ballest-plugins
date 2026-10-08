@@ -33,8 +33,7 @@ class Checkpoints
         if (now != run)
         {
             run = now;
-            for (uint k = 0; k < touched.length(); k++)
-                touched[k] = false;
+            ClearTouched();
         }
         int current = Race::CurrentCheckpoint();
         if (current >= 0 && current < int(touched.length()))
@@ -73,23 +72,30 @@ class Checkpoints
         return nearest;
     }
 
+    private void ClearTouched()
+    {
+        for (uint k = 0; k < touched.length(); k++)
+            touched[k] = false;
+    }
+
     private void Read()
     {
         x.resize(0);
         y.resize(0);
         z.resize(0);
+        // Index for index with the host's list, so Race::CurrentCheckpoint names the same checkpoint here.
         for (int k = 0; k < Race::CheckpointCount(); k++)
         {
-            double cx, cy, cz;
-            if (!Race::CheckpointPosition(k, cx, cy, cz))
-                continue;
+            double cx = 0, cy = 0, cz = 0;
+            Race::CheckpointPosition(k, cx, cy, cz);
             x.insertLast(cx);
             y.insertLast(cy);
             z.insertLast(cz);
         }
+        // The list is sorted by position, so checkpoints that turned up late can move the others' indexes: what was
+        // touched before can't be carried over, and starts again (the next touch marks the current one).
         touched.resize(x.length());
-        for (uint k = 0; k < touched.length(); k++)
-            touched[k] = false;
+        ClearTouched();
         generation++;
         Log::Info(x.length() + " checkpoints on " + trackKey);
     }

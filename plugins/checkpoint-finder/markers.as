@@ -61,14 +61,16 @@ class Markers
     // Call every frame while shown on a track.
     void Show(const Checkpoints@ cps)
     {
-        if (builtFor != cps.generation)
+        // A new list, or the host cleared the shapes (it does on a map change and when the game makes a new player
+        // controller): make them again. Show is false for a shape that's gone.
+        if (builtFor != cps.generation || (balls.length() > 0 && !Draw::Show(balls[0], true)))
             MakeBalls(cps);
         for (uint k = 0; k < balls.length(); k++)
             if (cps.touched[k] != ballTouched[k])
             {
                 ballTouched[k] = cps.touched[k];
                 float r, g, b;
-                Colour(cps, k, r, g, b);
+                Colour(k, cps.touched[k], r, g, b);
                 Draw::Glow(balls[k], r, g, b, ballTouched[k] ? kTouchedGlow : kBallGlow);
             }
         PlaceDots(cps);
@@ -86,14 +88,6 @@ class Markers
             dots[k].Hide();
     }
 
-    // A map change takes the shapes with it, so their ids are simply forgotten.
-    void Forget()
-    {
-        balls.resize(0);
-        ballTouched.resize(0);
-        builtFor = -1;
-    }
-
     private void MakeBalls(const Checkpoints@ cps)
     {
         Hide();
@@ -101,7 +95,7 @@ class Markers
         for (uint k = 0; k < cps.count; k++)
         {
             float r, g, b;
-            Colour(cps, k, r, g, b);
+            Colour(k, cps.touched[k], r, g, b);
             int ball = Draw::Ball(kBallRadius, r, g, b, true);
             Draw::Move(ball, cps.x[k], cps.y[k], cps.z[k]);
             balls.insertLast(ball);
@@ -135,7 +129,7 @@ class Markers
             double d = ball ? Math::sqrt(cps.DistanceSquared(k, bx, by, bz)) : 0;
             float size = Clamp(kDotLargest - float(d / kShrinkPerPixel), kDotSmallest, kDotLargest);
             float r, g, b;
-            Colour(cps, k, r, g, b);
+            Colour(k, cps.touched[k], r, g, b);
             dot.circle.SetBackground(r, g, b, cps.touched[k] ? kTouchedOpacity : 1);
             dot.circle.SetCornerRadius(size / 2);
             dot.circle.SetRect(sx - size / 2, sy - size / 2, size, size);
@@ -145,16 +139,20 @@ class Markers
             {
                 dot.labelText.text = int(d / 100) + " m";
                 dot.labelText.SetColor(r, g, b, 1);
-                dot.label.SetRect(sx - 30, sy + size / 2 + 4, 60, 20);
+                // Under the dot, or over it when the dot is pinned to the bottom edge.
+                float labelY = sy + size / 2 + 4;
+                if (labelY + 20 > h)
+                    labelY = sy - size / 2 - 24;
+                dot.label.SetRect(sx - 30, labelY, 60, 20);
             }
             dot.label.visible = labelled;
         }
     }
 }
 
-void Colour(const Checkpoints@ cps, uint k, float &out r, float &out g, float &out b)
+void Colour(uint k, bool touched, float &out r, float &out g, float &out b)
 {
-    if (cps.touched[k])
+    if (touched)
     {
         r = g = b = kTouchedGrey;
         return;
