@@ -6,7 +6,7 @@ string ToggleKey = "F7";
 
 Checkpoints cps;
 Markers markers;
-bool shown = true;
+bool shown = false;     // off until the key turns it on
 Input::Key toggle = Input::F7;
 
 void Main()
