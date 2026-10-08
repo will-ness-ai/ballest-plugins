@@ -8,6 +8,7 @@ const float kTouchedGlow = 1;
 const float kDotLargest = 44;          // px, at the checkpoint
 const float kDotSmallest = 12;         // px, from 128 m away
 const double kShrinkPerPixel = 400;    // cm farther for each pixel smaller
+const float kDotStep = 4;             // px: sizes come in steps, since restyling a dot rebuilds its window
 const float kEdge = 24;                // dots off the screen stay this far inside its edge
 const float kTouchedGrey = 0.45f;
 const float kTouchedOpacity = 0.4f;
@@ -34,11 +35,26 @@ class Dot
         @labelText = label.AddText("", 13);
     }
 
+    // Restyling (colour, corner radius) rebuilds the window, so it only happens when the look changes; moving and
+    // resizing don't.
+    void Style(float size, float r, float g, float b, float a)
+    {
+        if (size == styledSize && r == styled[0] && g == styled[1] && b == styled[2] && a == styled[3])
+            return;
+        styledSize = size;
+        styled = {r, g, b, a};
+        circle.SetBackground(r, g, b, a);
+        circle.SetCornerRadius(size / 2);
+    }
+
     void Hide()
     {
         circle.visible = false;
         label.visible = false;
     }
+
+    private float styledSize = -1;
+    private array<float> styled = {-1, -1, -1, -1};
 
     private UI::Window@ Bare()
     {
@@ -128,16 +144,18 @@ class Markers
             sy = Clamp(sy, kEdge, h - kEdge);
             double d = ball ? Math::sqrt(cps.DistanceSquared(k, bx, by, bz)) : 0;
             float size = Clamp(kDotLargest - float(d / kShrinkPerPixel), kDotSmallest, kDotLargest);
+            size = kDotSmallest + Math::floor((size - kDotSmallest) / kDotStep) * kDotStep;
             float r, g, b;
             Colour(k, cps.touched[k], r, g, b);
-            dot.circle.SetBackground(r, g, b, cps.touched[k] ? kTouchedOpacity : 1);
-            dot.circle.SetCornerRadius(size / 2);
+            dot.Style(size, r, g, b, cps.touched[k] ? kTouchedOpacity : 1);
             dot.circle.SetRect(sx - size / 2, sy - size / 2, size, size);
             dot.circle.visible = true;
             bool labelled = int(k) == nearest;
             if (labelled)
             {
-                dot.labelText.text = int(d / 100) + " m";
+                string metres = int(d / 100) + " m";
+                if (dot.labelText.text != metres)
+                    dot.labelText.text = metres;
                 dot.labelText.SetColor(r, g, b, 1);
                 // Under the dot, or over it when the dot is pinned to the bottom edge.
                 float labelY = sy + size / 2 + 4;
