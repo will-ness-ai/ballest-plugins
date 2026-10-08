@@ -1,0 +1,9 @@
+[meta]
+name = "Checkpoint Finder"
+version = "0.1.0"
+author = "Will"
+description = "Marks every checkpoint of the map, through walls, and greys out the ones you've touched this run."
+min_host = "0.23.6"
+
+[script]
+files = ["checkpoints.as", "markers.as", "main.as"]

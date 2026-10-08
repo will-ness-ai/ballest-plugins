@@ -1,0 +1,96 @@
+// The checkpoints of the map on screen, and which ones this run has touched.
+//
+// Checkpoints are the map's strips (Race::CheckpointPosition): the ones a run must clear before the finish opens,
+// tiny hidden ones included. Not the goals (Ghosts::Checkpoint), which include the finish, can't tell it apart, and
+// leave out the strips on maps with two or more goals.
+//
+// Touched: every checkpoint Race::CurrentCheckpoint has pointed at during this run. It moves to each checkpoint the
+// ball touches and stays through respawns; a restart from the beginning is a new Race::RunId, and starts over.
+
+class Checkpoints
+{
+    array<double> x, y, z;
+    array<bool> touched;
+    // Bumped whenever the list is read again (a new map, or checkpoints that turned up late), so a view knows to
+    // rebuild what it drew for the old list.
+    int generation = 0;
+
+    private string trackKey = "";
+    private int run = -1;
+
+    uint get_count() const property { return x.length(); }
+
+    // Call every frame on a track.
+    void Update()
+    {
+        string key = Race::TrackKey();
+        if (key != trackKey || Race::CheckpointCount() != int(x.length()))
+        {
+            trackKey = key;
+            Read();
+        }
+        int now = Race::RunId();
+        if (now != run)
+        {
+            run = now;
+            for (uint k = 0; k < touched.length(); k++)
+                touched[k] = false;
+        }
+        int current = Race::CurrentCheckpoint();
+        if (current >= 0 && current < int(touched.length()))
+            touched[current] = true;
+    }
+
+    // Off a track: forget the map, so the next one is read fresh.
+    void Leave()
+    {
+        trackKey = "";
+        run = -1;
+    }
+
+    double DistanceSquared(uint k, double px, double py, double pz) const
+    {
+        double dx = x[k] - px, dy = y[k] - py, dz = z[k] - pz;
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    // The untouched checkpoint nearest to a point, or -1 when every one is touched.
+    int NearestUntouched(double px, double py, double pz) const
+    {
+        int nearest = -1;
+        double best = 0;
+        for (uint k = 0; k < x.length(); k++)
+        {
+            if (touched[k])
+                continue;
+            double d = DistanceSquared(k, px, py, pz);
+            if (nearest < 0 || d < best)
+            {
+                nearest = k;
+                best = d;
+            }
+        }
+        return nearest;
+    }
+
+    private void Read()
+    {
+        x.resize(0);
+        y.resize(0);
+        z.resize(0);
+        for (int k = 0; k < Race::CheckpointCount(); k++)
+        {
+            double cx, cy, cz;
+            if (!Race::CheckpointPosition(k, cx, cy, cz))
+                continue;
+            x.insertLast(cx);
+            y.insertLast(cy);
+            z.insertLast(cz);
+        }
+        touched.resize(x.length());
+        for (uint k = 0; k < touched.length(); k++)
+            touched[k] = false;
+        generation++;
+        Log::Info(x.length() + " checkpoints on " + trackKey);
+    }
+}
