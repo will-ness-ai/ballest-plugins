@@ -5,7 +5,8 @@
 // properly afterwards.
 //   F7               show / hide the checkpoints
 //   PageUp/PageDown  previous / next variant (the pill at the top names the current one)
-// Checkpoints are the track's goals (Ghosts::Checkpoint), the ones a run must touch before the finish.
+// Checkpoints are the track's strips (Race::CheckpointPosition), the ones a run must clear before the finish opens;
+// the goals (Ghosts::Checkpoint) include the finish and miss the tiny hidden strips.
 
 const array<string> kVariants = {
     "E1 · Dots: a small solid dot on each checkpoint",
@@ -104,13 +105,12 @@ void ReadCheckpoints()
     cy.resize(0);
     cz.resize(0);
     numbers.resize(0);
-    for (int k = 0; k < Ghosts::CheckpointCount(); k++)
+    for (int k = 0; k < Race::CheckpointCount(); k++)
     {
-        int n;
         double x, y, z;
-        if (!Ghosts::Checkpoint(k, n, x, y, z))
+        if (!Race::CheckpointPosition(k, x, y, z))
             continue;
-        numbers.insertLast(n);
+        numbers.insertLast(k + 1);
         cx.insertLast(x);
         cy.insertLast(y);
         cz.insertLast(z);
@@ -274,7 +274,7 @@ void Update(float dt)
 
     // A new map, or its checkpoints turned up late: read them again. Shapes go with the old map by themselves.
     string key = Race::TrackKey();
-    if (key != trackKey || Ghosts::CheckpointCount() != int(numbers.length()))
+    if (key != trackKey || Race::CheckpointCount() != int(numbers.length()))
     {
         trackKey = key;
         balls.resize(0);
