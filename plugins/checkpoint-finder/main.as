@@ -1,15 +1,18 @@
-// ==== PROTOTYPE (grill-design round 1: how should the checkpoints be shown?) ====
-// Five variants of one question, to compare in-game. Not the plugin: the winner is rebuilt properly afterwards.
+// ==== PROTOTYPE (grill-design round 2: E won round 1; how do the checkpoints show through walls?) ====
+// Every variant keeps round 1's E: a small glowing ball on each checkpoint and a glowing line from the ball to the
+// nearest one. On top, each draws a marker on the screen over every checkpoint, so walls never hide it. Markers off
+// the screen's sides are pinned to its edge; ones behind the camera aren't shown. Not the plugin: the winner is rebuilt
+// properly afterwards.
 //   F7               show / hide the checkpoints
 //   PageUp/PageDown  previous / next variant (the pill at the top names the current one)
 // Checkpoints are the track's goals (Ghosts::Checkpoint), the ones a run must touch before the finish.
 
 const array<string> kVariants = {
-    "A · Pillars: a tall glowing beam from each checkpoint",
-    "B · Screen tags: number and distance over each one, through walls",
-    "C · Beacons: a big pulsing glowing ball on each one",
-    "D · Overview: a top-down camera over the whole map (F7 toggles it)",
-    "E · Guide line: a glowing line from the ball to the nearest checkpoint"
+    "E1 · Dots: a small solid dot on each checkpoint",
+    "E2 · Numbered dots: a bigger dot with the checkpoint's number in it",
+    "E3 · Growing dots: bigger as you get closer; the nearest says how far",
+    "E4 · Rings: a ring on each, with its distance under it",
+    "E5 · Nearest first: a big dot and distance on the nearest, faint dots on the rest"
 };
 
 // One colour per checkpoint number, cycling.
@@ -22,20 +25,28 @@ int variant = 0;
 bool shown = true;
 
 string trackKey = "";
-int builtVariant = -1;
 bool built = false;
 
 array<double> cx, cy, cz;
 array<int> numbers;
-array<int> shapes;          // Draw ids of the current variant
-int guide = 0;              // E: the line to the nearest checkpoint
+array<int> balls;           // a small glowing ball on each checkpoint
+int guide = 0;              // the line to the nearest checkpoint
 float guideAge = 0;
-float time = 0;
 
 UI::Window@ pill;
 UI::Text@ pillText;
-UI::Window@ overlay;
-array<UI::Text@> tags;
+
+// One marker per checkpoint: a round window (its corner radius half its size), an inner one for a ring's hole, and
+// a label window under it for the distance.
+class Marker
+{
+    UI::Window@ dot;
+    UI::Text@ number;
+    UI::Window@ hole;
+    UI::Window@ label;
+    UI::Text@ labelText;
+}
+array<Marker@> markers;
 
 void Main()
 {
@@ -49,16 +60,43 @@ void Main()
     pill.zOrder = 900;
     @pillText = pill.AddText("", 15);
     pillText.SetColor(1, 1, 1, 1);
-
-    @overlay = UI::CreateWindow();
-    overlay.SetBackground(0, 0, 0, 0);
-    overlay.SetPadding(0, 0);
-    overlay.SetBlocksClicks(false);
-    overlay.zOrder = 50;
 }
 
 double Min(double a, double b) { return a < b ? a : b; }
 double Max(double a, double b) { return a > b ? a : b; }
+
+UI::Window@ Bare(int z)
+{
+    UI::Window@ w = UI::CreateWindow();
+    w.SetPadding(0, 0);
+    w.SetBlocksClicks(false);
+    w.zOrder = z;
+    w.visible = false;
+    return w;
+}
+
+Marker@ MakeMarker()
+{
+    Marker m;
+    @m.dot = Bare(60);
+    @m.number = m.dot.AddTextAt("", 14, 0, 0);
+    m.number.SetAlign(1);
+    m.number.SetColor(0, 0, 0, 1);
+    @m.hole = Bare(61);
+    @m.label = Bare(60);
+    m.label.SetBackground(0, 0, 0, 0.55f);
+    m.label.SetCornerRadius(6);
+    m.label.SetPadding(6, 1);
+    @m.labelText = m.label.AddText("", 13);
+    return m;
+}
+
+void HideMarker(Marker@ m)
+{
+    m.dot.visible = false;
+    m.hole.visible = false;
+    m.label.visible = false;
+}
 
 void ReadCheckpoints()
 {
@@ -90,23 +128,20 @@ void Colour(int k, float &out r, float &out g, float &out b)
 
 void TearDown()
 {
-    for (uint i = 0; i < shapes.length(); i++)
-        Draw::Remove(shapes[i]);
-    shapes.resize(0);
+    for (uint i = 0; i < balls.length(); i++)
+        Draw::Remove(balls[i]);
+    balls.resize(0);
     if (guide != 0)
         Draw::Remove(guide);
     guide = 0;
-    for (uint i = 0; i < tags.length(); i++)
-        tags[i].text = "";
-    if (Camera::IsTaken())
-        Camera::Release();
+    for (uint i = 0; i < markers.length(); i++)
+        HideMarker(markers[i]);
     built = false;
 }
 
 void Build()
 {
     TearDown();
-    builtVariant = variant;
     built = true;
     if (!shown)
         return;
@@ -114,151 +149,125 @@ void Build()
     {
         float r, g, b;
         Colour(k, r, g, b);
-        if (variant == 0)
-        {
-            array<double> beam = {cx[k], cy[k], cz[k] - 200, cx[k], cy[k], cz[k] + 6000};
-            shapes.insertLast(Draw::Tube(beam, 40, r, g, b, true));
-        }
-        else if (variant == 2)
-        {
-            int ball = Draw::Ball(220, r, g, b, true);
-            Draw::Move(ball, cx[k], cy[k], cz[k]);
-            shapes.insertLast(ball);
-        }
-        else if (variant == 3)
-        {
-            int ball = Draw::Ball(400, r, g, b, true);
-            Draw::Move(ball, cx[k], cy[k], cz[k]);
-            shapes.insertLast(ball);
-        }
-        else if (variant == 4)
-        {
-            int ball = Draw::Ball(60, r, g, b, true);
-            Draw::Move(ball, cx[k], cy[k], cz[k]);
-            shapes.insertLast(ball);
-        }
-    }
-    if (variant == 3)
-        StartOverview();
-}
-
-// D: a camera straight down over every checkpoint and the ball.
-void StartOverview()
-{
-    if (numbers.length() == 0)
-        return;
-    double minX = cx[0], maxX = cx[0], minY = cy[0], maxY = cy[0], maxZ = cz[0];
-    for (uint k = 1; k < numbers.length(); k++)
-    {
-        minX = Min(minX, cx[k]);
-        maxX = Max(maxX, cx[k]);
-        minY = Min(minY, cy[k]);
-        maxY = Max(maxY, cy[k]);
-        maxZ = Max(maxZ, cz[k]);
-    }
-    double bx, by, bz;
-    if (Race::BallPosition(bx, by, bz))
-    {
-        minX = Min(minX, bx);
-        maxX = Max(maxX, bx);
-        minY = Min(minY, by);
-        maxY = Max(maxY, by);
-        maxZ = Max(maxZ, bz);
-    }
-    double extent = Max(maxX - minX, maxY - minY) * 0.5 + 1500;
-    if (!Camera::Take())
-        return;
-    // fov 90: half the view is as wide as the camera is high.
-    Camera::Set((minX + maxX) * 0.5, (minY + maxY) * 0.5, maxZ + extent * 1.1, -89.9, 0, 90);
-}
-
-void UpdateTags()
-{
-    float w, h;
-    if (!UI::ScreenSize(w, h))
-        return;
-    overlay.SetRect(0, 0, w, h);
-    while (tags.length() < numbers.length())
-    {
-        UI::Text@ t = overlay.AddTextAt("", 18, 0, 0);
-        t.SetWidth(140);
-        t.SetAlign(1);
-        tags.insertLast(t);
-    }
-    double bx, by, bz;
-    bool ball = Race::BallPosition(bx, by, bz);
-    for (uint k = 0; k < tags.length(); k++)
-    {
-        if (k >= numbers.length())
-        {
-            tags[k].text = "";
-            continue;
-        }
-        float sx, sy;
-        if (!Camera::Project(cx[k], cy[k], cz[k], sx, sy))
-        {
-            tags[k].text = "";
-            continue;
-        }
-        // Off the screen's sides: pinned to the edge, pointing the way.
-        string arrow = "";
-        if (sx < 40) { sx = 40; arrow = "< "; }
-        if (sx > w - 40) { sx = w - 40; arrow = "> "; }
-        if (sy < 40) { sy = 40; arrow = "^ "; }
-        if (sy > h - 40) { sy = h - 40; arrow = "v "; }
-        string label = arrow + "◆ " + (numbers[k] > 0 ? numbers[k] : int(k + 1));
-        if (ball)
-        {
-            double dx = cx[k] - bx, dy = cy[k] - by, dz = cz[k] - bz;
-            label += "  " + int(Math::sqrt(dx * dx + dy * dy + dz * dz) / 100) + " m";
-        }
-        float r, g, b;
-        Colour(k, r, g, b);
-        tags[k].text = label;
-        tags[k].SetColor(r, g, b, 1);
-        tags[k].SetPosition(sx - 70, sy - 11);
+        int ball = Draw::Ball(60, r, g, b, true);
+        Draw::Move(ball, cx[k], cy[k], cz[k]);
+        balls.insertLast(ball);
     }
 }
 
-void UpdateGuide(float dt)
+void UpdateGuide(float dt, int nearest, double bx, double by, double bz)
 {
     guideAge += dt;
     if (guideAge < 0.15f)
         return;
     guideAge = 0;
-    double bx, by, bz;
-    if (!Race::BallPosition(bx, by, bz) || numbers.length() == 0)
-        return;
-    int best = 0;
-    double bestD = 1e30;
-    for (uint k = 0; k < numbers.length(); k++)
-    {
-        double dx = cx[k] - bx, dy = cy[k] - by, dz = cz[k] - bz;
-        double d = dx * dx + dy * dy + dz * dz;
-        if (d < bestD) { bestD = d; best = k; }
-    }
     if (guide != 0)
         Draw::Remove(guide);
+    guide = 0;
+    if (nearest < 0)
+        return;
     float r, g, b;
-    Colour(best, r, g, b);
-    array<double> line = {bx, by, bz + 60, cx[best], cy[best], cz[best]};
+    Colour(nearest, r, g, b);
+    array<double> line = {bx, by, bz + 60, cx[nearest], cy[nearest], cz[nearest]};
     guide = Draw::Tube(line, 8, r, g, b, true);
+}
+
+string Metres(double d) { return int(d / 100) + " m"; }
+
+void UpdateMarkers(int nearest, bool ball, double bx, double by, double bz)
+{
+    float w, h;
+    if (!UI::ScreenSize(w, h))
+        return;
+    while (markers.length() < numbers.length())
+        markers.insertLast(MakeMarker());
+    for (uint k = 0; k < markers.length(); k++)
+    {
+        Marker@ m = markers[k];
+        float sx, sy;
+        if (k >= numbers.length() || !Camera::Project(cx[k], cy[k], cz[k], sx, sy))
+        {
+            HideMarker(m);
+            continue;
+        }
+        sx = float(Max(24, Min(w - 24, sx)));
+        sy = float(Max(24, Min(h - 24, sy)));
+        double d = 0;
+        if (ball)
+        {
+            double dx = cx[k] - bx, dy = cy[k] - by, dz = cz[k] - bz;
+            d = Math::sqrt(dx * dx + dy * dy + dz * dz);
+        }
+        float r, g, b;
+        Colour(k, r, g, b);
+        float size = 16, alpha = 1;
+        bool showNumber = false, ring = false, showDistance = false;
+        if (variant == 1)
+        {
+            size = 26;
+            showNumber = true;
+        }
+        else if (variant == 2)
+        {
+            size = float(Max(12, Min(44, 44 - d / 400)));
+            showDistance = int(k) == nearest;
+        }
+        else if (variant == 3)
+        {
+            size = 26;
+            ring = true;
+            showDistance = ball;
+        }
+        else if (variant == 4)
+        {
+            bool near = int(k) == nearest;
+            size = near ? 34 : 12;
+            alpha = near ? 1 : 0.45f;
+            showDistance = near;
+        }
+        m.dot.SetBackground(r, g, b, alpha);
+        m.dot.SetCornerRadius(size / 2);
+        m.dot.SetRect(sx - size / 2, sy - size / 2, size, size);
+        m.number.text = showNumber ? "" + (numbers[k] > 0 ? numbers[k] : int(k + 1)) : "";
+        m.number.SetWidth(size);
+        m.number.SetPosition(0, size / 2 - 9);
+        m.dot.visible = true;
+        if (ring)
+        {
+            float inner = size - 8;
+            m.hole.SetBackground(0.05f, 0.05f, 0.08f, 0.6f);
+            m.hole.SetCornerRadius(inner / 2);
+            m.hole.SetRect(sx - inner / 2, sy - inner / 2, inner, inner);
+        }
+        m.hole.visible = ring;
+        if (showDistance && ball)
+        {
+            m.labelText.text = Metres(d);
+            m.labelText.SetColor(r, g, b, 1);
+            m.label.SetRect(sx - 30, sy + size / 2 + 4, 60, 20);
+        }
+        m.label.visible = showDistance && ball;
+    }
 }
 
 void Update(float dt)
 {
-    time += dt;
-    if (Input::Pressed(Input::PageDown)) { variant = (variant + 1) % kVariants.length(); built = false; }
-    if (Input::Pressed(Input::PageUp)) { variant = (variant + kVariants.length() - 1) % kVariants.length(); built = false; }
-    if (Input::Pressed(Input::F7)) { shown = !shown; built = false; }
+    if (Input::Pressed(Input::PageDown))
+        variant = (variant + 1) % kVariants.length();
+    if (Input::Pressed(Input::PageUp))
+        variant = (variant + kVariants.length() - 1) % kVariants.length();
+    if (Input::Pressed(Input::F7))
+    {
+        shown = !shown;
+        built = false;
+    }
 
     bool onTrack = Race::OnTrack();
     pill.visible = onTrack;
-    overlay.visible = onTrack && shown && variant == 1;
     if (!onTrack)
     {
-        if (Camera::IsTaken())
-            Camera::Release();
+        for (uint i = 0; i < markers.length(); i++)
+            HideMarker(markers[i]);
         trackKey = "";
         return;
     }
@@ -268,12 +277,12 @@ void Update(float dt)
     if (key != trackKey || Ghosts::CheckpointCount() != int(numbers.length()))
     {
         trackKey = key;
-        shapes.resize(0);
+        balls.resize(0);
         guide = 0;
         ReadCheckpoints();
         built = false;
     }
-    if (!built || builtVariant != variant)
+    if (!built)
         Build();
 
     pillText.text = "PROTOTYPE  " + kVariants[variant] + "   |   " + numbers.length() + " checkpoints   |   F7 " +
@@ -281,20 +290,22 @@ void Update(float dt)
 
     if (!shown)
         return;
-    if (variant == 1)
-        UpdateTags();
-    else if (variant == 2)
-    {
-        // Pulse so they catch the eye from afar.
-        float pulse = 0.6f + 0.4f * float(Math::sin(time * 4));
-        for (uint k = 0; k < shapes.length(); k++)
+    double bx, by, bz;
+    bool ball = Race::BallPosition(bx, by, bz);
+    int nearest = -1;
+    double bestD = 1e30;
+    if (ball)
+        for (uint k = 0; k < numbers.length(); k++)
         {
-            float r, g, b;
-            Colour(k, r, g, b);
-            Draw::Glow(shapes[k], r, g, b, pulse * 8);
+            double dx = cx[k] - bx, dy = cy[k] - by, dz = cz[k] - bz;
+            double d = dx * dx + dy * dy + dz * dz;
+            if (d < bestD)
+            {
+                bestD = d;
+                nearest = k;
+            }
         }
-    }
-    else if (variant == 4)
-        UpdateGuide(dt);
+    UpdateGuide(dt, nearest, bx, by, bz);
+    UpdateMarkers(nearest, ball, bx, by, bz);
 }
 // ==== END PROTOTYPE ====
