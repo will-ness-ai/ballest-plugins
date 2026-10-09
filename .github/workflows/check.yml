@@ -1,0 +1,50 @@
+# Every plugin, checked against the plugin manager's own rules and API (AnythingGoes-ballest/ballest-plugin-manager):
+#   review-rules  its tools/review_guard.py: no built binaries, no Console:: in plugin scripts (pull requests)
+#   compile       its tools/tests/run.sh: builds the host with llvm-mingw, then compiles each plugin against the
+#                 host's real script API, so a script error fails here instead of in the game
+name: check
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  review-rules:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: AnythingGoes-ballest/ballest-plugin-manager
+          path: host
+          sparse-checkout: tools/review_guard.py
+          sparse-checkout-cone-mode: false
+      # The guard checks the repo it sits in, so it runs from a copy in this one.
+      - run: mkdir -p tools && cp host/tools/review_guard.py tools/ && rm -rf host
+      - run: python tools/review_guard.py changed origin/${{ github.base_ref }}
+
+  compile:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: AnythingGoes-ballest/ballest-plugin-manager
+          path: host
+      - id: toolchain
+        uses: actions/cache@v4
+        with:
+          path: host/tools/llvm-mingw
+          key: llvm-mingw-20260922-ucrt-x86_64
+      - if: steps.toolchain.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP\llvm-mingw.zip"
+          Invoke-WebRequest https://github.com/mstorsjo/llvm-mingw/releases/download/20260922/llvm-mingw-20260922-ucrt-x86_64.zip -OutFile $zip
+          Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP\llvm"
+          Move-Item "$env:RUNNER_TEMP\llvm\llvm-mingw-20260922-ucrt-x86_64" host\tools\llvm-mingw
+      - shell: bash
+        run: bash host/tools/tests/run.sh "$PWD"/plugins/*/
